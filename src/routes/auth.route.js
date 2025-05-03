@@ -18,29 +18,16 @@ router
   .post(prepareBody, checkMail, asyncHandler("User", Signup));
 
 //USER_LOGIN
-router
-  .route("/login")
-  .post(prepareBody, asyncHandler("User", asyncHandler("", Signin)));
+router.route("/login").post(prepareBody, asyncHandler("User", Signin));
 
-router
-  .route("/profile")
-  .get(verifySign, asyncHandler("User", asyncHandler("", getProfile)));
+router.route("/profile").get(verifySign, asyncHandler("User", getProfile));
 router
   .route("/edit-profile")
-  .patch(
-    prepareBody,
-    verifySign,
-    asyncHandler("User", asyncHandler("", updateProfile))
-  );
+  .patch(prepareBody, verifySign, asyncHandler("User", updateProfile));
 
 router
   .route("/track-login")
-  .post(
-    verifySign,
-    asyncHandler("User", asyncHandler("", trackLoginAndAddCredits))
-  );
+  .post(verifySign, asyncHandler("User", trackLoginAndAddCredits));
 
-router
-  .route("/add-credits")
-  .post(verifySign, asyncHandler("User", asyncHandler("", addCredits)));
+router.route("/add-credits").post(verifySign, asyncHandler("User", addCredits));
 module.exports = router;

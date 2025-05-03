@@ -1,19 +1,18 @@
 const axios = require("axios");
-const RedisService = require("../redis/redis"); // Make sure this path is correct
+const RedisService = require("../redis/redis");
 const httpRes = require("../utils/http");
 const { GET, SERVER_ERROR_MESSAGE } = require("../utils/message");
 const { prepareResponse } = require("../utils/response");
-require("dotenv").config();
 
 exports.getRedditPosts = async (req, res) => {
   const CACHE_KEY = "reddit:popular_posts";
-  const CACHE_TTL = 900; // 15 minutes in seconds
-  const MAX_POSTS = 100; // Set your desired maximum number of posts
+  const CACHE_TTL = 900; // 15 minutes
+  const MAX_POSTS = 25; // Lower limit for unauthenticated requests
+  const USER_AGENT = "web:MyApp:v1.0 (by /u/YourRedditUsername)"; // MUST follow format
 
   try {
-    // 1. First try to get cached data
+    // 1. Try cached data first
     const cachedData = await RedisService.get(CACHE_KEY);
-
     if (cachedData) {
       return res.status(httpRes.OK).json(
         prepareResponse("OK (CACHED)", GET, cachedData, {
@@ -24,62 +23,45 @@ exports.getRedditPosts = async (req, res) => {
       );
     }
 
-    // 2. Fetch fresh data from Reddit API
-    let allPosts = [];
-    let after = null;
-    let hasMore = true;
-    let requestCount = 0;
-    const maxRequests = 5; // Limit number of requests to prevent rate limiting
-
-    while (
-      hasMore &&
-      requestCount < maxRequests &&
-      allPosts.length < MAX_POSTS
-    ) {
-      const url = after
-        ? `https://www.reddit.com/r/popular.json?after=${after}`
-        : "https://www.reddit.com/r/popular.json";
-
-      const response = await axios.get(url, {
-        headers: { "User-Agent": "YourApp/1.0" },
-      });
-
-      if (!response.data?.data?.children) {
-        throw new Error("Invalid Reddit API response structure");
+    // 2. Fetch fresh data (single request only)
+    const response = await axios.get(
+      "https://www.reddit.com/r/popular.json?limit=25",
+      {
+        headers: {
+          "User-Agent": USER_AGENT, // Critical for API access
+          "Accept-Encoding": "gzip",
+        },
+        timeout: 3000,
       }
+    );
 
-      const batch = response.data.data.children.map((post) => ({
-        id: post.data?.id,
-        title: post.data?.title,
-        url: `https://reddit.com${post.data?.permalink}`,
-        author: post.data?.author,
-        subreddit: post.data?.subreddit,
-        text: post.data?.selftext,
-        upvotes: post.data?.ups || 0,
-        thumbnail: post.data?.thumbnail,
-        created_utc: post.data?.created_utc,
-        num_comments: post.data?.num_comments || 0,
-        media: post.data?.media,
-        is_video: post.data?.is_video,
-      }));
-
-      allPosts = [...allPosts, ...batch];
-      after = response.data.data.after;
-      hasMore = !!after && allPosts.length < MAX_POSTS;
-      requestCount++;
+    if (!response.data?.data?.children) {
+      throw new Error("Invalid Reddit API response");
     }
 
-    // 3. Cache the aggregated results
-    await RedisService.setWithExpiry(CACHE_KEY, allPosts, CACHE_TTL);
+    const posts = response.data.data.children
+      .filter((post) => post.data)
+      .map((post) => ({
+        id: post.data.id,
+        title: post.data.title,
+        url: `https://reddit.com${post.data.permalink}`,
+        author: post.data.author,
+        subreddit: post.data.subreddit,
+        upvotes: post.data.ups || 0,
+        created_utc: post.data.created_utc,
+      }));
 
-    // 4. Return fresh data
+    // 3. Cache the results
+    if (posts.length > 0) {
+      await RedisService.setWithExpiry(CACHE_KEY, posts, CACHE_TTL);
+    }
+
+    // 4. Return data
     return res.status(httpRes.OK).json(
-      prepareResponse("OK", GET, allPosts, {
+      prepareResponse("OK", GET, posts, {
         source: "reddit-api",
         cacheStatus: "set",
-        expiresIn: `${CACHE_TTL} seconds`,
-        postCount: allPosts.length,
-        batchCount: requestCount,
+        postCount: posts.length,
       })
     );
   } catch (error) {
@@ -97,11 +79,10 @@ exports.getRedditPosts = async (req, res) => {
       );
     }
 
-    // 6. No cache available, return error
-    return res.status(httpRes.SERVER_ERROR).json(
+    // 6. Final error response
+    return res.status(error.response?.status || httpRes.SERVER_ERROR).json(
       prepareResponse("SERVER_ERROR", SERVER_ERROR_MESSAGE, null, {
         message: error.message,
-        ...(error.response?.data ? { apiError: error.response.data } : {}),
         cacheStatus: "unavailable",
       })
     );
