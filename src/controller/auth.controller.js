@@ -11,7 +11,7 @@ const {
   CONTACT_SUPPORT,
   UPDATE_PROFILE_SUCCESS,
 } = require("../utils/message");
-const { hashPassword, comparePassword } = require("../utils/Password");
+const { hashPassword, comparePassword } = require("../utils/password");
 const { generateSign } = require("../utils/token");
 
 // ✅ Register a new user
